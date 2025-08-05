@@ -1,76 +1,101 @@
 # Email Scheduler Application
 
-A Spring Boot application that allows you to schedule emails to be sent at specific times using Quartz Scheduler with MySQL persistence.
+A Spring Boot application that allows you to schedule emails to be sent at specific times using Quartz Scheduler with MySQL persistence.  
+**Now supports clustered, highly available deployments!**
+
+---
 
 ## Features
 
 - 📧 Schedule emails to be sent at specific dates and times
 - 🔄 Persistent job storage using MySQL database
-- ⏰ Quartz Scheduler for reliable job execution
+- ⏰ Quartz Scheduler for reliable, distributed job execution
 - 🚀 RESTful API for easy integration
 - ✅ Input validation with proper error handling
 - 📱 JSON-based API responses
+- 🏢 **Clustered mode:** Run multiple instances for high availability—only one instance will execute each job
+
+---
 
 ## Prerequisites
 
-- Java 21
+- Java 21+
 - MySQL 8.0+
 - Maven 3.6+
 - SMTP email service (Gmail, Outlook, etc.)
+
+---
 
 ## Setup
 
 ### 1. Database Setup
 
 1. Create a MySQL database named `quartznet`
-2. Run the Quartz MySQL schema script to create required tables:
+2. Run the official Quartz MySQL schema script to create required tables:
    ```sql
-   -- Download and run the official Quartz MySQL script
-   -- Available at: https://github.com/quartz-scheduler/quartz/tree/main/quartz-core/src/main/resources/org/quartz/impl/jdbcjobstore
+   -- Download from https://github.com/quartz-scheduler/quartz/blob/main/quartz-core/src/main/resources/org/quartz/impl/jdbcjobstore/tables_mysql_innodb.sql
+   -- Then run in your MySQL client
    ```
 
-### 2. Configuration
+### 2. Configure Application
 
-Update `src/main/resources/application.properties` with your settings:
+Edit `src/main/resources/application.properties`:
 
 ```properties
-# Database Configuration
 spring.datasource.url=jdbc:mysql://localhost:3306/quartznet?useSSL=false&allowPublicKeyRetrieval=true
-spring.datasource.username=your_username
-spring.datasource.password=your_password
+spring.datasource.username=YOUR_DB_USER
+spring.datasource.password=YOUR_DB_PASSWORD
 
-# Quartz Configuration
+# Quartz Clustering
 spring.quartz.job-store-type=jdbc
-spring.quartz.properties.org.quartz.threadPool.threadCount=5
+spring.quartz.properties.org.quartz.jobStore.isClustered=true
+spring.quartz.properties.org.quartz.scheduler.instanceId=AUTO
+spring.quartz.properties.org.quartz.scheduler.instanceName=EmailSchedulerCluster
+spring.quartz.properties.org.quartz.jobStore.clusterCheckinInterval=20000
+spring.quartz.properties.org.quartz.jobStore.misfireThreshold=60000
+spring.quartz.jdbc.initialize-schema=never
 
-# Email Configuration (Gmail Example)
+# Email (SMTP)
 spring.mail.host=smtp.gmail.com
 spring.mail.port=587
-spring.mail.username=your_email@gmail.com
-spring.mail.password=your_app_password
+spring.mail.username=YOUR_EMAIL
+spring.mail.password=YOUR_EMAIL_PASSWORD
 spring.mail.properties.mail.smtp.auth=true
 spring.mail.properties.mail.smtp.starttls.enable=true
 ```
 
-**Note:** For Gmail, you'll need to use an App Password instead of your regular password.
+---
 
-### 3. Build and Run
+## Running in Clustered Mode
 
-```bash
-# Build the project
-mvn clean install
+You can run **multiple instances** of this application (on the same or different machines) and Quartz will ensure that **only one instance executes each scheduled job**.
 
-# Run the application
-mvn spring-boot:run
+### **Start Multiple Instances (Example on One Machine):**
+
+```sh
+java -jar target/EmailSender-0.0.1-SNAPSHOT.jar --server.port=8080
+java -jar target/EmailSender-0.0.1-SNAPSHOT.jar --server.port=8081
+java -jar target/EmailSender-0.0.1-SNAPSHOT.jar --server.port=8082
 ```
 
-The application will start on `http://localhost:8080`
+- All instances connect to the same MySQL database.
+- All instances register themselves in the Quartz cluster.
+- When a job is due, **only one instance** will execute it, even if all are running.
 
-## API Documentation
+---
 
-### Schedule Email
+## How Clustering Works
 
-**Endpoint:** `POST /api/email/schedule`
+- **Shared Database:** All instances use the same MySQL database for job storage and coordination.
+- **Leader Election:** Quartz uses database locks to ensure only one instance picks up and executes a job.
+- **Failover:** If one instance goes down, another will take over job execution.
+- **No Duplicates:** Even if you POST the same job to multiple instances, only one will execute it.
+
+---
+
+## API Usage
+
+**POST** `/api/email/schedule`
 
 **Request Body:**
 ```json
@@ -78,115 +103,50 @@ The application will start on `http://localhost:8080`
   "to": "recipient@example.com",
   "subject": "Test Email",
   "body": "This is a scheduled email.",
-  "scheduledTime": "2024-07-10T15:30:00"
+  "scheduledTime": "2025-08-05T15:30:00"
 }
 ```
 
-**Date Format:** `yyyy-MM-dd'T'HH:mm:ss` (24-hour format, no timezone)
+**Responses:**
+- `{"message": "Email scheduled successfully"}` (HTTP 200)
+- `{"error": "Invalid scheduled time: must be in the future"}` (HTTP 400)
+- `{"error": "Email already scheduled for this recipient at this time"}` (HTTP 400)
+- `{"error": "Invalid date format. Use yyyy-MM-dd'T'HH:mm:ss"}` (HTTP 400)
 
-**Response Examples:**
-
-Success (200 OK):
-```json
-{
-  "message": "Email scheduled successfully"
-}
-```
-
-Error - Past Time (400 Bad Request):
-```json
-{
-  "error": "Invalid scheduled time: must be in the future"
-}
-```
-
-Error - Invalid Format (400 Bad Request):
-```json
-{
-  "error": "Invalid date format. Use yyyy-MM-dd'T'HH:mm:ss"
-}
-```
-
-## Usage Examples
-
-### Using curl
-
-```bash
-curl -X POST http://localhost:8080/api/email/schedule \
-  -H "Content-Type: application/json" \
-  -d '{
-    "to": "test@example.com",
-    "subject": "Hello from Email Scheduler",
-    "body": "This email was scheduled using the Email Scheduler application!",
-    "scheduledTime": "2024-07-10T15:30:00"
-  }'
-```
-
-### Using Postman
-
-1. Create a new POST request
-2. Set URL to: `http://localhost:8080/api/email/schedule`
-3. Set Headers: `Content-Type: application/json`
-4. Set Body (raw JSON):
-```json
-{
-  "to": "recipient@example.com",
-  "subject": "Test Email",
-  "body": "This is a scheduled email.",
-  "scheduledTime": "2024-07-10T15:30:00"
-}
-```
+---
 
 ## Project Structure
 
-```
-src/main/java/com/EmailSender/EmailSender/
-├── EmailSenderApplication.java      # Main application class
-├── EmailJob.java                    # Quartz job for sending emails
-├── EmailSchedulerService.java       # Service for scheduling emails
-├── EmailSchedulerController.java    # REST controller
-└── EmailScheduleRequest.java        # DTO for API requests
-```
+- `EmailSenderApplication.java` — Main Spring Boot entry point
+- `EmailSchedulerController.java` — REST API controller
+- `EmailSchedulerService.java` — Business logic for scheduling
+- `EmailJob.java` — Quartz job for sending emails
+- `EmailScheduleRequest.java` — DTO for API requests
+- `application.properties` — All configuration
 
-## How It Works
+---
 
-1. **Request Reception:** The controller receives a POST request with email details and scheduled time
-2. **Validation:** The system validates the input (future time, correct format)
-3. **Job Creation:** A Quartz job is created with the email details
-4. **Persistence:** The job is stored in MySQL database
-5. **Execution:** At the scheduled time, Quartz triggers the job
-6. **Email Sending:** The EmailJob sends the email using Spring Mail
+## Production Recommendations
 
-## Error Handling
+- Use a **robust MySQL server** accessible by all app instances
+- Use a **load balancer** to distribute API requests across instances
+- Secure your SMTP credentials and database access
+- Monitor logs for job execution and failures
 
-The application provides comprehensive error handling:
-
-- **400 Bad Request:** Invalid input (past time, wrong format)
-- **500 Internal Server Error:** Server-side errors (database, email service)
-
-All errors return JSON responses with descriptive messages.
-
-## Technologies Used
-
-- **Spring Boot 3.5.3** - Application framework
-- **Quartz Scheduler** - Job scheduling and persistence
-- **MySQL** - Database for job storage
-- **Spring Mail** - Email sending functionality
-- **Maven** - Build tool
-- **Java 21** - Programming language
+---
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
+Pull requests welcome! Please open an issue first to discuss changes.
+
+---
 
 ## License
 
-This project is open source and available under the [MIT License](LICENSE).
+MIT
 
-## Support
+---
 
-If you encounter any issues or have questions, please create an issue in the GitHub repository. 
+## Author
+
+[Your Name](https://github.com/VedantGupta-DTU)
